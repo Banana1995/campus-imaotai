@@ -1,48 +1,163 @@
 <template>
   <div class="app-container home">
-    <p>
-      本项目中所有内容只供学习和研究使用，不得将本项目中任何内容用于违反国家/地区/组织等的法律法规或相关规定的其他用途。
-    </p>
-    <p>
-      所有直接或间接使用本项目的个人和组织，应24小时内完成学习和研究，并及时删除本项目中的所有内容。如对本项目的功能有需求，应自行开发相关功能。
-    </p>
-    <p></p>
-    <p>本项目免费，无任何盈利</p>
-    <p>项目完全开源，更新地址：https://github.com/oddfar/campus-imaotai</p>
-
     <el-card class="box-card">
-      <p>版本情况:</p>
-      <p>campus-imaotai:{{ version }}</p>
-      <p>campus框架:{{ frameworkVersion }}</p>
+      <div slot="header" class="clearfix">
+        <span>绑定用户</span>
+      </div>
+      <el-form ref="form" :model="form" label-width="120px">
+        <el-form-item label="用户名">
+          <el-input v-model="form.remark" />
+        </el-form-item>
+        <el-form-item label="手机号">
+          <div style="display: flex;align-items: center; gap: 20px;">
+            <el-input v-model="form.mobile" />
+            <div>
+              <el-button
+                type="primary"
+                :disabled="state"
+                @click="sendCode(form.mobile)"
+              >发送验证码<span v-if="state">({{ stateNum }})</span>
+              </el-button>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item label="验证码">
+          <el-input v-model="form.code" />
+        </el-form-item>
+        <el-form-item label="选择门店">
+          <el-card class="shop-card">
+            <div slot="header" class="clearfix">
+              <el-input v-model="shopSearchContent" @input="handleInputDebounce" @focus="showShopList = true" @blur="handleBlur" />
+            </div>
+            <template v-if="showShopList || !form.shop">
+              <div v-for="shop in shopList" :key="shop.ishopId" class="shopListItem" @click="handleSelectShop(shop)">
+                <span class="shopName"> {{ shop.tenantName }}  </span>
+                <span class="shopAddress"> {{ shop.fullAddress }} </span>
+              </div>
+            </template>
+          </el-card>
+        </el-form-item>
+        <el-form-item>
+          <el-button
+            type="primary"
+            @click="submit"
+          >提交
+          </el-button>
+        </el-form-item>
+      </el-form>
+
     </el-card>
   </div>
 </template>
 
 <script>
-import {getVersion} from "@/api/system/index";
+import {
+  getUser,
+  updateUser,
+  sendCode,
+  login
+} from '@/api/imt/user'
+import { listShop } from '@/api/imt/shop'
+import { debounce } from '@/utils'
 
 export default {
-  name: "Index",
+  name: 'Index',
   data() {
     return {
-      // 版本号
-      version: "",
-      frameworkVersion: "",
-    };
-  },
-  created() {
-    this.getVersion();
-  },
-  methods: {
-    getVersion() {
-      getVersion().then((response) => {
-          this.version = response.data.version;
-          this.frameworkVersion = response.data.frameworkVersion;
-        }
-      );
+      form: {
+        remark: '',
+        mobile: '',
+        code: '',
+        deviceId: '',
+        shop: ''
+      },
+      stateNum: 60,
+      state: false,
+      shopList: [],
+      queryParams: {
+        pageNum: 1,
+        pageSize: 10
+      },
+      total: 0,
+      shopSearchContent: '',
+      showShopList: false,
+      shopLoading: false,
+      handleInputDebounce: null
     }
   },
-};
+  created() {
+    this.handleInputDebounce = debounce(this.getList, 500)
+  },
+  methods: {
+    guid() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(
+        /[xy]/g,
+        function(c) {
+          var r = (Math.random() * 16) | 0
+          var v = c === 'x' ? r : (r & 0x3) | 0x8
+          return v.toString(16)
+        }
+      )
+    },
+    sendCode(mobile, deviceId) {
+      if (deviceId === undefined || deviceId === '') {
+        this.form.deviceId = this.guid()
+      } else {
+        this.form.deviceId = deviceId
+      }
+      sendCode(mobile, this.form.deviceId).then(() => {
+        this.$modal.msgSuccess('发送成功')
+        this.state = true
+        const timer = setInterval(() => {
+          this.stateNum--
+          if (this.stateNum === 0) {
+            clearInterval(timer)
+            this.state = false
+            this.stateNum = 60
+          }
+        }, 1000)
+      })
+    },
+    getList() {
+      this.shopLoading = true
+      listShop({
+        pageNum: 1,
+        pageSize: 50,
+        cityName: this.shopSearchContent
+      }).then((response) => {
+        console.log(response.rows)
+        this.shopList = response.rows
+        this.total = response.total
+        this.shopLoading = false
+      })
+    },
+    handleBlur() {
+      setTimeout(() => {
+        this.showShopList = false
+      }, 200)
+    },
+    handleSelectShop(shop) {
+      console.log(shop)
+      this.form.shop = shop.ishopId
+      this.shopSearchContent = shop.tenantName
+    },
+    async login() {
+      await login(this.form.mobile, this.form.code, this.form.deviceId)
+    },
+    async submit() {
+      await this.login()
+      const { data } = await getUser(this.form.mobile)
+      updateUser({
+        ...data,
+        remark: this.form.remark,
+        itemCode: 10213,
+        ishopId: this.form.shop
+      }).then(() => {
+        this.$modal.msgSuccess('提交成功')
+      })
+    }
+  }
+}
 </script>
 
 <style scoped lang="scss">
@@ -109,5 +224,27 @@ export default {
     }
   }
 }
+.shopListItem {
+  display: flex;
+  justify-content: space-between ;
+  padding: 10px 0;
+  line-height: 16px;
+  cursor: pointer;
+  &:hover {
+    background-color: #f5f5f5;
+  }
+  .shopName {
+    color: #333;
+  }
+  .shopAddress {
+    color: #999;
+  }
+}
+</style>
+
+<style>
+  .shop-card .el-card__body {
+      padding: 0px 20px 14px 20px;
+  }
 </style>
 
